@@ -60,6 +60,7 @@ def load_ckpt(checkpoint_path, generator = None, kp_detector = None, ph2kp = Non
     if kp_detector is not None:
         kp_detector.load_state_dict(checkpoint['kp_detector'])
 
+'''初始头部姿态'''
 def get_img_pose(img_path):
     processor = config.OPENFACE_POSE_EXTRACTOR_PATH
 

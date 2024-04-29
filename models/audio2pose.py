@@ -14,7 +14,7 @@ class audio2poseLSTM(nn.Module):
 
 
     def forward(self,x):
-        pose_em = self.em_pose(x["img"])
+        pose_em = self.em_pose(x["img"])  # resnet => image pose embedding
         bs = pose_em.shape[0]
         zero_state = torch.zeros((2, bs, 256), requires_grad=True).to(pose_em.device)
         cur_state = (zero_state, zero_state)
@@ -22,9 +22,9 @@ class audio2poseLSTM(nn.Module):
         bs,seqlen,num,dims = x["audio"].shape
 
         audio = x["audio"].reshape(-1, 1, num, dims)
-        audio_em = self.em_audio(audio).reshape(bs, seqlen, 256)
+        audio_em = self.em_audio(audio).reshape(bs, seqlen, 256)  # resnet => audio embedding
 
-        result = [self.output(img_em).unsqueeze(1)]
+        result = [self.output(img_em).unsqueeze(1)]  # linear
 
         for i in range(seqlen):
 

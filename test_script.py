@@ -30,45 +30,61 @@ def normalize_kp(kp_source, kp_driving, kp_driving_initial,
 
 
 def test_with_input_audio_and_image(img_path, audio_path,phs, generator_ckpt, audio2pose_ckpt, save_dir="samples/results"):
+
     with open("config_file/vox-256.yaml") as f:
-        config = yaml.load(f)
+        config = yaml.safe_load(f)
     # temp_audio = audio_path
     # print(audio_path)
     cur_path = os.getcwd()
 
+    '''格式化采样率和编码方式'''
     sr,_ = wavfile.read(audio_path)
     if sr!=16000:
         temp_audio = os.path.join(cur_path,"samples","temp.wav")
+        '''
+        -async: 音视频同步
+        -ac 1 单声道
+        -vn 去除视频流，仅保留音频
+        -acodec pcm_s16le 指定音频编码器， 脉冲编码调制+16位小端（little endian）整数格式
+        -ar 16000 采样率
+        '''
         command = "ffmpeg -y -i %s -async 1 -ac 1 -vn -acodec pcm_s16le -ar 16000 %s" % (audio_path, temp_audio)
         os.system(command)
     else:
         temp_audio = audio_path
 
 
-    opt = argparse.Namespace(**yaml.load(open("config_file/audio2kp.yaml")))
+    opt = argparse.Namespace(**yaml.safe_load(open("config_file/audio2kp.yaml")))
 
     img = read_img(img_path).cuda()
-
+    '''input-1: 图像的初始姿态(openFace)'''
     first_pose = get_img_pose(img_path)#.cuda()
-
+    '''input-2:音频特征'''
+    '''
+     mfcc(python_speech_features) + 
+     梅尔滤波器组特征(python_speech_features) + 
+     基频(pyworld) + 
+     基频有效性标志
+    '''
     audio_feature = get_audio_feature_from_audio(temp_audio)
     frames = len(audio_feature) // 4
     frames = min(frames,len(phs["phone_list"]))
 
     tp = np.zeros([256, 256], dtype=np.float32)
+    # 头部姿态注释
     draw_annotation_box(tp, first_pose[:3], first_pose[3:])
     tp = torch.from_numpy(tp).unsqueeze(0).unsqueeze(0).cuda()
-    ref_pose = get_pose_from_audio(tp, audio_feature, audio2pose_ckpt)
+    '''audio 2 pose (model : E_h)'''
+    ref_pose = get_pose_from_audio(tp, audio_feature, audio2pose_ckpt) # shape:(T,6)
+    # pose 作为Audio2kpTransformer的输入
     torch.cuda.empty_cache()
     trans_seq = ref_pose[:, 3:]
     rot_seq = ref_pose[:, :3]
 
-
-
     audio_seq = audio_feature#[40:]
     ph_seq = phs["phone_list"]
 
-
+    '''input-formatted'''
     ph_frames = []
     audio_frames = []
     pose_frames = []
@@ -104,12 +120,14 @@ def test_with_input_audio_and_image(img_path, audio_path,phs, generator_ckpt, au
         audio_frames.append(audio)
         pose_frames.append(pose)
 
+    # shape
     audio_f = torch.from_numpy(np.array(audio_frames,dtype=np.float32)).unsqueeze(0)
     poses = torch.from_numpy(np.array(pose_frames, dtype=np.float32)).unsqueeze(0)
     ph_frames = torch.from_numpy(np.array(ph_frames)).unsqueeze(0)
     bs = audio_f.shape[1]
     predictions_gen = []
 
+    '''init model and load state dict(params)'''
     kp_detector = KPDetector(**config['model_params']['kp_detector_params'],
                              **config['model_params']['common_params'])
     generator = OcclusionAwareGenerator(**config['model_params']['generator_params'],
@@ -121,7 +139,7 @@ def test_with_input_audio_and_image(img_path, audio_path,phs, generator_ckpt, au
 
     load_ckpt(generator_ckpt, kp_detector=kp_detector, generator=generator,ph2kp=ph2kp)
 
-
+    ''''''
     ph2kp.eval()
     generator.eval()
     kp_detector.eval()
@@ -155,7 +173,12 @@ def test_with_input_audio_and_image(img_path, audio_path,phs, generator_ckpt, au
     # kwargs = {'duration': 1. / 25.0}
     video_path = os.path.join(log_dir, "temp", f_name)
     print("save video to: ", video_path)
-    imageio.mimsave(video_path, predictions_gen, fps=25.0)
+    try:
+        print('predictions_gen_size',len(predictions_gen))
+    except Exception as e:
+        print(e)
+        pass
+    imageio.mimsave(video_path, predictions_gen, fps=25.0,codec='libx264')
 
     # audio_path = os.path.join(audio_dir, x['name'][0].replace(".mp4", ".wav"))
     save_video = os.path.join(log_dir, f_name)
@@ -165,16 +188,18 @@ def test_with_input_audio_and_image(img_path, audio_path,phs, generator_ckpt, au
 
 
 
-
-
+img_path = 'samples/imgs/o1.jpg'
+audio_path = 'samples/audios/trump.wav'
+phoneme_path = 'samples/phonemes/trump.json'
+save_dir = 'tomato_outputs'
 
 if __name__ == '__main__':
-    argparser = argparse.ArgumentParser()
-    argparser.add_argument("--img_path", type=str, default=None, help="path of the input image ( .jpg ), preprocessed by image_preprocess.py")
-    argparser.add_argument("--audio_path", type=str, default=None, help="path of the input audio ( .wav )")
-    argparser.add_argument("--phoneme_path", type=str, default=None, help="path of the input phoneme. It should be note that the phoneme must be consistent with the input audio")
-    argparser.add_argument("--save_dir", type=str, default="samples/results", help="path of the output video")
-    args = argparser.parse_args()
+    # argparser = argparse.ArgumentParser()
+    # argparser.add_argument("--img_path", type=str, default=None, help="path of the input image ( .jpg ), preprocessed by image_preprocess.py")
+    # argparser.add_argument("--audio_path", type=str, default=None, help="path of the input audio ( .wav )")
+    # argparser.add_argument("--phoneme_path", type=str, default=None, help="path of the input phoneme. It should be note that the phoneme must be consistent with the input audio")
+    # argparser.add_argument("--save_dir", type=str, default="samples/results", help="path of the output video")
+    # args = argparser.parse_args()
 
-    phoneme = parse_phoneme_file(args.phoneme_path)
-    test_with_input_audio_and_image(args.img_path,args.audio_path,phoneme,config.GENERATOR_CKPT,config.AUDIO2POSE_CKPT,args.save_dir)
+    phoneme = parse_phoneme_file(phoneme_path)
+    test_with_input_audio_and_image(img_path,audio_path,phoneme,config.GENERATOR_CKPT,config.AUDIO2POSE_CKPT,save_dir)
